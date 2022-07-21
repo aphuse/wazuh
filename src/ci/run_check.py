@@ -273,7 +273,6 @@ def runCppCheck(moduleName):
 
     currentDir = utils.moduleDirPath(moduleName)
     cppcheckCommand = "cppcheck --force --std=c++14 --quiet \
-                       --suppressions-list={0}/cppcheckSuppress.txt \
                        {0}".format(currentDir)
 
     out = subprocess.run(cppcheckCommand,
