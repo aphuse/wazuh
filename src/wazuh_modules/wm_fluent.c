@@ -11,11 +11,11 @@
 #ifndef WIN32
 
 #include "wmodules.h"
-#include <os_net/os_net.h>
+#include "../os_net/os_net.h"
 #include <openssl/ssl.h>
 #include <openssl/err.h>
-#include "os_crypto/md5/md5_op.h"
-#include "os_crypto/sha512/sha512_op.h"
+#include "../os_crypto/md5/md5_op.h"
+#include "../os_crypto/sha512/sha512_op.h"
 #include "shared.h"
 #include "msgpack.h"
 
@@ -68,12 +68,13 @@ static int wm_fluent_check_config(wm_fluent_t * fluent);
 static void wm_fluent_poll_server(wm_fluent_t * fluent);
 
 const wm_context WM_FLUENT_CONTEXT = {
-    FLUENT_WM_NAME,
-    (wm_routine)wm_fluent_main,
-    (wm_routine)(void *)wm_fluent_destroy,
-    (cJSON * (*)(const void *))wm_fluent_dump,
-    NULL,
-    NULL
+    .name = FLUENT_WM_NAME,
+    .start = (wm_routine)wm_fluent_main,
+    .destroy = (void(*)(void *))wm_fluent_destroy,
+    .dump = (cJSON * (*)(const void *))wm_fluent_dump,
+    .sync = NULL,
+    .stop = NULL,
+    .query = NULL,
 };
 
 // Module main function. It won't return
@@ -204,7 +205,7 @@ static int wm_fluent_connect(wm_fluent_t * fluent) {
 
     /* Connect */
 
-    fluent->client_sock = OS_ConnectTCP(fluent->port, ip, 0);
+    fluent->client_sock = OS_ConnectTCP(fluent->port, ip, 0, 0);
     free(ip);
 
     if (fluent->client_sock < 0) {

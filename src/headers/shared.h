@@ -96,6 +96,16 @@
 #include <direct.h>
 #endif
 
+#ifdef __cplusplus
+#include <atomic>
+#define _Atomic(T) std::atomic<T>
+#else
+#ifdef hpux
+// TODO: remove this line after upgrading GCC on HP-UX
+#define _Atomic(T) T
+#endif
+#endif
+
 #include <time.h>
 #include <errno.h>
 #include <libgen.h>
@@ -171,9 +181,9 @@ typedef uint8_t u_int8_t;
 #endif
 
 #if defined(__GNUC__) && __GNUC__ >= 7
-#define fallthrough __attribute__ ((fallthrough))
+#define WFALLTHROUGH __attribute__ ((fallthrough))
 #else
-#define fallthrough ((void) 0)
+#define WFALLTHROUGH ((void) 0)
 #endif
 
 /* IPv4 structure */
@@ -237,7 +247,7 @@ extern const char *__local_name;
 #ifndef WAZUH_UNIT_TESTING
 #define FOREVER() 1
 #else
-#include "unit_tests/wrappers/common.h"
+#include "../unit_tests/wrappers/common.h"
 #endif
 
 #include "debug_op.h"
@@ -276,16 +286,16 @@ extern const char *__local_name;
 #include "notify_op.h"
 #include "version_op.h"
 #include "utf8_op.h"
-#include "shared.h"
+#include "rwlock_op.h"
 #include "log_builder.h"
 
-#include "os_xml/os_xml.h"
-#include "os_regex/os_regex.h"
+#include "../os_xml/os_xml.h"
+#include "../os_regex/os_regex.h"
 
-#include "error_messages/error_messages.h"
-#include "error_messages/debug_messages.h"
-#include "error_messages/information_messages.h"
-#include "error_messages/warning_messages.h"
+#include "../error_messages/error_messages.h"
+#include "../error_messages/debug_messages.h"
+#include "../error_messages/information_messages.h"
+#include "../error_messages/warning_messages.h"
 #include "custom_output_search.h"
 #include "url.h"
 #include "yaml2json.h"
@@ -297,5 +307,8 @@ extern const char *__local_name;
 #include "enrollment_op.h"
 #include "buffer_op.h"
 #include "atomic.h"
+#include "logging_helper.h"
+#include "../shared_modules/rsync/include/rsync.h"
+#include "../shared_modules/dbsync/include/dbsync.h"
 
 #endif /* SHARED_H */

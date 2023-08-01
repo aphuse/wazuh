@@ -13,7 +13,7 @@ from typing import Tuple, Union
 import uvloop
 
 from wazuh.core import common
-from wazuh.core.cluster import common as c_common, server, client
+from wazuh.core.cluster import common as c_common, server, client, cluster
 from wazuh.core.cluster.dapi import dapi
 from wazuh.core.cluster.utils import context_tag
 from wazuh.core.exception import WazuhClusterError
@@ -64,6 +64,8 @@ class LocalServerHandler(server.AbstractServerHandler):
             return self.get_nodes(data)
         elif command == b'get_health':
             return self.get_health(data)
+        elif command == b'get_hash':
+            return self.get_ruleset_hashes()
         elif command == b'send_file':
             path, node_name = data.decode().split(' ')
             return self.send_file_request(path, node_name)
@@ -122,6 +124,19 @@ class LocalServerHandler(server.AbstractServerHandler):
         """
         raise NotImplementedError
 
+    def get_ruleset_hashes(self):
+        """Obtain local ruleset paths and hashes.
+
+        Returns
+        -------
+        bytes
+            Result.
+        bytes
+            JSON containing local file paths and their hash.
+        """
+        hashes = cluster.get_ruleset_status(self.server.node.integrity_control)
+        return b'ok', json.dumps(hashes).encode()
+
     def send_file_request(self, path, node_name):
         """Send a file from the API to the cluster.
 
@@ -151,7 +166,7 @@ class LocalServerHandler(server.AbstractServerHandler):
             Request result.
         """
         result = future.result()
-        send_res = asyncio.create_task(self.send_request(command=b'send_f_res', data=result))
+        send_res = asyncio.create_task(self.log_exceptions(self.send_request(command=b'send_f_res', data=result)))
         send_res.add_done_callback(self.send_res_callback)
 
     def send_res_callback(self, future):
@@ -249,8 +264,8 @@ class LocalServerHandlerMaster(LocalServerHandler):
             node_name, request = data.split(b' ', 1)
             node_name = node_name.decode()
             if node_name in self.server.node.clients:
-                asyncio.create_task(
-                    self.server.node.clients[node_name].send_request(b'dapi', self.name.encode() + b' ' + request))
+                asyncio.create_task(self.log_exceptions(
+                    self.server.node.clients[node_name].send_request(b'dapi', self.name.encode() + b' ' + request)))
                 return b'ok', b'Request forwarded to worker node'
             else:
                 raise WazuhClusterError(3022)
@@ -288,12 +303,8 @@ class LocalServerHandlerMaster(LocalServerHandler):
             Result.
         dict
             Dict object containing nodes information.
-
         """
-        return b'ok', json.dumps(self.server.node.get_health(json.loads(filter_nodes)),
-                                 default=lambda o: "n/a" if
-                                 isinstance(o, datetime) and o == get_date_from_timestamp(0)
-                                 else (o.__str__() if isinstance(o, datetime) else None)).encode()
+        return b'ok', json.dumps(self.server.node.get_health(json.loads(filter_nodes))).encode()
 
     def send_file_request(self, path, node_name):
         """Send a file from the API to the cluster.
@@ -373,17 +384,20 @@ class LocalServerHandlerWorker(LocalServerHandler):
         if command == b'dapi':
             if self.server.node.client is None:
                 raise WazuhClusterError(3023)
-            asyncio.create_task(self.server.node.client.send_request(b'dapi', self.name.encode() + b' ' + data))
+            asyncio.create_task(self.log_exceptions(
+                self.server.node.client.send_request(b'dapi', self.name.encode() + b' ' + data)))
             return b'ok', b'Added request to API requests queue'
         elif command == b'sendsync':
             if self.server.node.client is None:
                 raise WazuhClusterError(3023)
-            asyncio.create_task(self.server.node.client.send_request(b'sendsync', self.name.encode() + b' ' + data))
+            asyncio.create_task(self.log_exceptions(
+                self.server.node.client.send_request(b'sendsync', self.name.encode() + b' ' + data)))
             return None, None
         elif command == b'sendasync':
             if self.server.node.client is None:
                 raise WazuhClusterError(3023)
-            asyncio.create_task(self.server.node.client.send_request(b'sendsync', self.name.encode() + b' ' + data))
+            asyncio.create_task(self.log_exceptions(
+                self.server.node.client.send_request(b'sendsync', self.name.encode() + b' ' + data)))
             return b'ok', b'Added request to sendsync requests queue'
         else:
             return super().process_request(command, data)
@@ -442,7 +456,7 @@ class LocalServerHandlerWorker(LocalServerHandler):
         if self.server.node.client is None:
             raise WazuhClusterError(3023)
         else:
-            request = asyncio.create_task(self.server.node.client.send_request(command, arguments))
+            request = asyncio.create_task(self.log_exceptions(self.server.node.client.send_request(command, arguments)))
             request.add_done_callback(functools.partial(self.get_api_response, command))
             return b'ok', b'Sent request to master node'
 
@@ -458,8 +472,8 @@ class LocalServerHandlerWorker(LocalServerHandler):
         future : asyncio.Future object
             Request result.
         """
-        send_res = asyncio.create_task(self.send_request(command=b'dapi_res' if in_command == b'dapi' else b'control_res',
-                                                         data=future.result()))
+        send_res = asyncio.create_task(self.log_exceptions(
+            self.send_request(command=b'dapi_res' if in_command == b'dapi' else b'control_res', data=future.result())))
         send_res.add_done_callback(self.send_res_callback)
 
     def send_file_request(self, path, node_name):

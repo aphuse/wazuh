@@ -4,11 +4,12 @@
 
 
 from copy import deepcopy
+from typing import Union
+
 from wazuh.core.common import MAX_SOCKET_BUFFER_SIZE, WAZUH_VERSION, AGENT_NAME_LEN_LIMIT, MAX_GROUPS_PER_MULTIGROUP
 
 GENERIC_ERROR_MSG = "Wazuh Internal Error. See log for more detail"
 DOCU_VERSION = 'current' if WAZUH_VERSION == '' else '.'.join(WAZUH_VERSION.split('.')[:2]).lstrip('v')
-
 
 class WazuhException(Exception):
     """
@@ -48,6 +49,9 @@ class WazuhException(Exception):
         1017: 'Some Wazuh daemons are not ready yet in node "{node_name}" ({not_ready_daemons})',
         1018: 'Body request is not a valid JSON',
         1019: 'Error trying to create backup file',
+        1020: {'message': 'Could not find any Wazuh log file',
+               'remediation': 'Please check `WAZUH_HOME/logs`'},
+
         # Configuration: 1100 - 1199
         1101: {'message': 'Requested component does not exist',
                'remediation': 'Run `WAZUH_PATH/bin/wazuh-logtest -t` to check your configuration'},
@@ -90,26 +94,33 @@ class WazuhException(Exception):
         1117: {'message': "Unable to connect with component. The component might be disabled."},
         1118: {'message': "Could not request component configuration"},
         1119: "Directory '/tmp' needs read, write & execution permission for 'wazuh' user",
-        1121: {'message': "Error connecting with socket"},
+        1121: {'message': "Error connecting with socket",
+               'remediation': "Please ensure the selected module is running and properly configured"},
         1122: {'message': 'Experimental features are disabled',
                'remediation': 'Experimental features can be enabled in WAZUH_PATH/api/configuration/api.yaml or '
-                              'using API endpoint https://documentation.wazuh.com/current/user-manual/api/'
+                              f"using API endpoint https://documentation.wazuh.com/{DOCU_VERSION}/user-manual/api/"
                               'reference.html#operation/api.controllers.manager_controller.put_api_config or '
-                              'https://documentation.wazuh.com/current/user-manual/api/reference.html#operation/'
+                              f"https://documentation.wazuh.com/{DOCU_VERSION}/"
+                              'user-manual/api/reference.html#operation/'
                               'api.controllers.cluster_controller.put_api_config'},
         1123: {
             'message': f"Error communicating with socket. Query too long, maximum allowed size for queries is "
                        f"{MAX_SOCKET_BUFFER_SIZE // 1024} KB"},
         1124: {'message': 'Remote command detected',
-               'remediation': f'To solve this issue please enable the remote commands in the API settings or add an '
+               'remediation': f'To solve this issue, please enable the remote commands in the API settings or add an '
                               f'exception: https://documentation.wazuh.com/{DOCU_VERSION}/user-manual/api/'
-                              f'configuration.html#remote-commands-configuration'},
+                              f'configuration.html#remote-commands-localfile-and-wodle-command'},
         1125: {'message': 'Invalid ossec configuration',
                'remediation': 'Please, provide a valid ossec configuration'
                },
         1126: {'message': 'Error updating ossec configuration',
                'remediation': 'Please, ensure `WAZUH_PATH/etc/ossec.conf` has the proper permissions and ownership.'
                },
+        1127: {'message': 'Protected section was modified',
+               'remediation': 'To solve this, either revert the changes made to this section or disable the protection '
+                              'in the API settings: '
+                              f"https://documentation.wazuh.com/{DOCU_VERSION}/user-manual/api/configuration.html"},
+        1128: {'message': 'Invalid configuration for the given component'},
 
         # Rule: 1200 - 1299
         1200: {'message': 'Error reading rules from `WAZUH_HOME/etc/ossec.conf`',
@@ -202,12 +213,6 @@ class WazuhException(Exception):
                },
 
         # Syscheck/AR: 1600 - 1699
-        1600: {'message': 'There is no database for selected agent with id',
-               'remediation': 'Please, upgrade wazuh to v3.7.0 or newer. Visit '
-                              f'https://documentation.wazuh.com/{DOCU_VERSION}/upgrade-guide/index.html'
-                              ' to obtain more information on upgrading wazuh'
-               },
-
         1603: 'Invalid status. Valid statuses are: all, solved and outstanding',
         1650: 'Active response - Command not specified',
 
@@ -374,6 +379,7 @@ class WazuhException(Exception):
         2008: {'message': 'Corrupted RBAC database',
                'remediation': 'Restart the Wazuh service to restore the RBAC database to default'},
         2009: {'message': 'Pagination error. Response from wazuh-db was over the maximum socket buffer size'},
+        2010: {'message': 'The requested read operation did not complete fully'},
 
         # Cluster
         3000: 'Cluster',
@@ -441,6 +447,7 @@ class WazuhException(Exception):
         3037: 'Error while processing Agent-info chunks',
         3038: "Error while processing extra-valid files",
         3039: "Timeout while waiting to receive a file",
+        3040: "Error while waiting to receive a file",
 
         # RBAC exceptions
         # The messages of these exceptions are provisional until the RBAC documentation is published.
@@ -466,9 +473,6 @@ class WazuhException(Exception):
                               'POST /security/roles/{role_id}/policies'},
         4011: {'message': 'The specified role-policy link already exist'},
         4013: {'message': 'The specified name already exists'},
-        4015: {'message': 'Permission denied, could not remove agents from group before deleting it',
-               'remediation': 'Please, make sure you have the right permissions for actions: agent:modify_group and '
-                              'group:modify_assignments before attempting to delete the group'},
         4016: {'message': 'The specified user-role relation does not exist',
                'remediation': 'Please, create the specified user-role relation with the endpoint '
                               'POST /security/user/{username}/roles'},
@@ -512,6 +516,8 @@ class WazuhException(Exception):
                'remediation': 'The value of the allow_run_as parameter must be true (enabled authentication through '
                               'authorization context) or false (disabled authentication through authorization context).'
                },
+        5011: {'message': 'Administrator users can only be modified by themselves',
+               'remediation': 'Log in as administrator and try again'},
 
         # Security issues
         6000: {'message': 'Limit of login attempts reached. '
@@ -528,34 +534,47 @@ class WazuhException(Exception):
                'remediation': f'You can enable it using the following endpoint: https://documentation.wazuh.com/'
                               f'{DOCU_VERSION}/user-manual/api/reference.html#operation/api.controllers.'
                               f'security_controller.edit_run_as'},
+        6005: {'message': 'Maximum number of requests per minute reached'},
 
         # Logtest
         7000: {'message': 'Error trying to get logtest response'},
         7001: {'message': 'Error trying to read logtest session token',
-               'remediation': 'Make sure you introduce the token within the field "token"'}
+               'remediation': 'Make sure you introduce the token within the field "token"'},
 
-        # > 9000: Authd
+        # Vulnerability detector
+        8000: {'message': 'Unexpected error trying to request vulnerability detector scan'}
     }
 
     # Reserve agent upgrade custom errors
     ERRORS.update({key: {'message': 'Upgrade module\'s reserved exception IDs (1810-1899). '
                                     'The error message will be the output of upgrade module'}
                    for key in range(1811, 1900)})
+    # Reserve agent upgrade custom errors
+    ERRORS.update({key: {'message': 'Vulnerability scan\'s reserved exception IDs (8001-9000). '
+                                    'The error message will be the output of vulnerability scan module'}
+                   for key in range(8001, 9000)})
 
-    def __init__(self, code, extra_message=None, extra_remediation=None, cmd_error=False, dapi_errors=None, title=None,
-                 type=None):
-        """
-        Creates a Wazuh Exception.
+    def __init__(self, code: int, extra_message: str = None, extra_remediation: str = None, cmd_error: bool = False,
+                 dapi_errors: dict = None, title: str = None, type: str = None):
+        """Create a WazuhException object.
 
-        :param code: Exception code.
-        :param extra_message: Adds an extra message to the error description.
-        :param extra_remediation: Adds an extra description to remediation
-        :param cmd_error: If it is a custom error code (i.e. ossec commands), the error description will be the message.
-        :param dapi_errors: dict with details about node and logfile. I.e.:
-                            {'master-node': {'error': 'Wazuh Internal error',
-                                             'logfile': WAZUH_HOME/logs/api.log}
-                            }
-        :param title: Name of the exception to be shown
+        Parameters
+        ----------
+        code : int
+            Exception code.
+        extra_message : str
+            Adds an extra message to the error description.
+        extra_remediation : str
+            Adds an extra description to remediation.
+        cmd_error : bool
+            If it is a custom error code (i.e. ossec commands), the error description will be the message.
+        dapi_errors : dict
+            Dictionary with details about node and logfile. I.e.: {'master-node': {'error': 'Wazuh Internal error',
+            'logfile': WAZUH_HOME/logs/api.log}}
+        title : str
+            Name of the exception to be shown.
+        type : str
+            Type of the exception.
         """
         self._type = type if type else 'about:blank'
         self._title = title if title else self.__class__.__name__
@@ -565,28 +584,28 @@ class WazuhException(Exception):
         self._cmd_error = cmd_error
         self._dapi_errors = {} if dapi_errors is None else deepcopy(dapi_errors)
 
-        error_details = self.ERRORS[self._code] if not cmd_error else extra_message
-        if isinstance(error_details, dict):
-            code_message, code_remediation = error_details.get('message', ''), error_details.get('remediation', None)
-        else:
-            code_message, code_remediation = error_details, None
+        if not cmd_error and self._code in self.ERRORS:
+            error_details = self.ERRORS[self._code]
+            if isinstance(error_details, dict):
+                code_message, code_remediation = error_details.get('message', ''), error_details.get('remediation', None)
+            else:
+                code_message, code_remediation = error_details, None
 
-        if not cmd_error:
             if extra_message:
                 if isinstance(extra_message, dict):
                     self._message = code_message.format(**extra_message)
                 else:
-                    self._message = "{0}: {1}".format(code_message, extra_message)
+                    self._message = f"{code_message}: {extra_message}"
             else:
                 self._message = code_message
+            self._remediation = code_remediation if extra_remediation is None \
+                else f"{code_remediation}: {extra_remediation}"
         else:
             self._message = extra_message
-
-        self._remediation = code_remediation if extra_remediation is None \
-            else f"{code_remediation}: {extra_remediation}"
+            self._remediation = None
 
     def __str__(self):
-        return "Error {0} - {1}".format(self._code, self._message)
+        return f"Error {self._code} - {self._message}"
 
     def __repr__(self):
         return repr(self.to_dict())
@@ -623,7 +642,7 @@ class WazuhException(Exception):
         obj.__dict__ = deepcopy(dict(self.__dict__))
         return obj
 
-    def to_dict(self):
+    def to_dict(self) -> dict:
         return {'type': self._type,
                 'title': self._title,
                 'code': self._code,
@@ -674,19 +693,29 @@ class WazuhInternalError(WazuhException):
     _default_type = "about:blank"
     _default_title = "Wazuh Internal Error"
 
-    def __init__(self, code, extra_message=None, extra_remediation=None, cmd_error=False, dapi_errors=None, ids=None,
-                 title=None, type=None):
-        """Creates a WazuhInternalError exception.
+    def __init__(self, code: int, extra_message: str = None, extra_remediation: str = None, cmd_error: bool = False,
+                 dapi_errors: dict = None, ids: Union[list, set] = None, title: str = None, type: str = None):
+        """Create a WazuhInternalError exception.
 
-        :param code: Exception code.
-        :param extra_message: Adds an extra message to the error description.
-        :param extra_remediation: Adds an extra description to remediation
-        :param cmd_error: If it is a custom error code (i.e. ossec commands), the error description will be the message.
-        :param dapi_errors: dict with details about node and logfile. I.e.:
-                            {'master-node': {'error': 'Wazuh Internal error',
-                                             'logfile': WAZUH_HOME/logs/api.log}
-                            }
-        :param ids: List or set with the ids involved in the exception
+        Parameters
+        ----------
+        code : int
+            Exception code.
+        extra_message : str
+            Adds an extra message to the error description.
+        extra_remediation : str
+            Adds an extra description to remediation.
+        cmd_error : bool
+            If it is a custom error code (i.e. ossec commands), the error description will be the message.
+        dapi_errors : dict
+            Dictionary with details about node and logfile. I.e.: {'master-node': {'error': 'Wazuh Internal error',
+            'logfile': WAZUH_HOME/logs/api.log}}
+        title : str
+            Name of the exception to be shown.
+        type : str
+            Type of the exception.
+        ids : list or set
+            List or set with the ids involved in the exception
         """
 
         super().__init__(code, extra_message=extra_message,
@@ -710,24 +739,34 @@ class WazuhClusterError(WazuhInternalError):
 class WazuhError(WazuhException):
     """
     This type of exception is raised as a controlled response to a bad request from user
-    that cannot be performed properly
+    that cannot be performed properly.
     """
     _default_type = "about:blank"
     _default_title = "Bad Request"
 
-    def __init__(self, code, extra_message=None, extra_remediation=None, cmd_error=False, dapi_errors=None, ids=None,
-                 title=None, type=None):
-        """Creates a WazuhError exception.
+    def __init__(self, code: int, extra_message: str = None, extra_remediation: str = None, cmd_error: bool = False,
+                 dapi_errors: dict = None, ids: Union[list, set] = None, title: str = None, type: str = None):
+        """Create a WazuhError exception.
 
-        :param code: Exception code.
-        :param extra_message: Adds an extra message to the error description.
-        :param extra_remediation: Adds an extra description to remediation
-        :param cmd_error: If it is a custom error code (i.e. ossec commands), the error description will be the message.
-        :param dapi_errors: dict with details about node and logfile. I.e.:
-                            {'master-node': {'error': 'Wazuh Internal error',
-                                             'logfile': WAZUH_HOME/logs/api.log}
-                            }
-        :param ids: List or set with the ids involved in the exception
+        Parameters
+        ----------
+        code : int
+            Exception code.
+        extra_message : str
+            Adds an extra message to the error description.
+        extra_remediation : str
+            Adds an extra description to remediation.
+        cmd_error : bool
+            If it is a custom error code (i.e. ossec commands), the error description will be the message.
+        dapi_errors : dict
+            Dictionary with details about node and logfile. I.e.: {'master-node': {'error': 'Wazuh Internal error',
+            'logfile': WAZUH_HOME/logs/api.log}}
+        title : str
+            Name of the exception to be shown.
+        type : str
+            Type of the exception.
+        ids : list or set
+            List or set with the ids involved in the exception
         """
 
         super().__init__(code, extra_message=extra_message,
@@ -750,7 +789,7 @@ class WazuhError(WazuhException):
                 result._ids = self.ids | other.ids
         return result
 
-    def to_dict(self):
+    def to_dict(self) -> dict:
         result = super().to_dict()
         result['ids'] = list(self.ids)
 

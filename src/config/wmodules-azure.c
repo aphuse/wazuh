@@ -33,6 +33,7 @@ static const char *XML_CONTAINER = "container";
 static const char *XML_CONTAINER_NAME = "name";
 static const char *XML_CONTAINER_BLOBS = "blobs";
 static const char *XML_CONTAINER_TYPE="content_type";
+static const char *XML_PATH = "path";
 
 static const char *XML_REQUEST_QUERY = "query";
 static const char *XML_TIME_OFFSET = "time_offset";
@@ -47,6 +48,9 @@ static void wm_clean_api(wm_azure_api_t * api_config);
 static void wm_clean_request(wm_azure_request_t * request);
 static void wm_clean_storage(wm_azure_storage_t * storage);
 static void wm_clean_container(wm_azure_container_t * container);
+
+static const char *AUTHENTICATION_OPTIONS_URL = "https://documentation.wazuh.com/current/azure/activity-services/prerequisites/credentials.html";
+static const char *DEPRECATED_MESSAGE = "Deprecated tag <%s> found at module '%s'. This tag was deprecated in %s; please use a different authentication method. Check %s for more information.";
 
 // Parse XML
 
@@ -71,7 +75,7 @@ int wm_azure_read(const OS_XML *xml, xml_node **nodes, wmodule *module)
     module->data = azure;
 
     if (!nodes) {
-        mwarn("Empty configuration at module '%s'.", WM_AZURE_CONTEXT.name);
+        merror("Empty configuration at module '%s'.", WM_AZURE_CONTEXT.name);
         return OS_INVALID;
     }
 
@@ -200,7 +204,7 @@ int wm_azure_read(const OS_XML *xml, xml_node **nodes, wmodule *module)
         } else if (is_sched_tag(nodes[i]->element)) {
             // Do nothing
         } else {
-            merror("No such tag '%s' at module '%s'.", nodes[i]->element, WM_AZURE_CONTEXT.name);	
+            merror("No such tag '%s' at module '%s'.", nodes[i]->element, WM_AZURE_CONTEXT.name);
             return OS_INVALID;
         }
     }
@@ -236,11 +240,15 @@ int wm_azure_api_read(const OS_XML *xml, XML_NODE nodes, wm_azure_api_t * api_co
             return OS_INVALID;
 
         } else if (!strcmp(nodes[i]->element, XML_APP_ID)) {
-            if (*nodes[i]->content != '\0')
+            if (*nodes[i]->content != '\0') {
+                mwarn(DEPRECATED_MESSAGE, nodes[i]->element, WM_AZURE_CONTEXT.name, "4.4", AUTHENTICATION_OPTIONS_URL);
                 os_strdup(nodes[i]->content, api_config->application_id);
+            }
         } else if (!strcmp(nodes[i]->element, XML_APP_KEY)) {
-            if (*nodes[i]->content != '\0')
+            if (*nodes[i]->content != '\0') {
+                mwarn(DEPRECATED_MESSAGE, nodes[i]->element, WM_AZURE_CONTEXT.name, "4.4", AUTHENTICATION_OPTIONS_URL);
                 os_strdup(nodes[i]->content, api_config->application_key);
+            }
         } else if (!strcmp(nodes[i]->element, XML_AUTH_PATH)) {
             if (*nodes[i]->content != '\0')
                 os_strdup(nodes[i]->content, api_config->auth_path);
@@ -469,8 +477,10 @@ int wm_azure_storage_read(const OS_XML *xml, XML_NODE nodes, wm_azure_storage_t 
 
         } else if (nodes[i]->content != NULL && *nodes[i]->content != '\0') {
             if (!strcmp(nodes[i]->element, XML_ACCOUNT_NAME)) {
+                mwarn(DEPRECATED_MESSAGE, nodes[i]->element, WM_AZURE_CONTEXT.name, "4.4", AUTHENTICATION_OPTIONS_URL);
                 os_strdup(nodes[i]->content, storage->account_name);
             } else if (!strcmp(nodes[i]->element, XML_ACCOUNT_KEY)) {
+                mwarn(DEPRECATED_MESSAGE, nodes[i]->element, WM_AZURE_CONTEXT.name, "4.4", AUTHENTICATION_OPTIONS_URL);
                 os_strdup(nodes[i]->content, storage->account_key);
             } else if (!strcmp(nodes[i]->element, XML_AUTH_PATH)) {
                 os_strdup(nodes[i]->content, storage->auth_path);
@@ -525,6 +535,7 @@ int wm_azure_container_read(XML_NODE nodes, wm_azure_container_t * container) {
     container->blobs = NULL;
     container->time_offset = NULL;
     container->content_type = NULL;
+    container->path = NULL;
 
     for (i = 0; nodes[i]; i++) {
 
@@ -568,6 +579,15 @@ int wm_azure_container_read(XML_NODE nodes, wm_azure_container_t * container) {
                 merror("At module '%s': Invalid timeout.", WM_AZURE_CONTEXT.name);
                 return OS_INVALID;
             }
+
+        } else if (!strcmp(nodes[i]->element, XML_PATH)) {
+            if (strlen(nodes[i]->content) != 0) {
+                os_strdup(nodes[i]->content, container->path);
+            } else if (strlen(nodes[i]->content) == 0) {
+                merror("Empty content for tag '%s' at module '%s'", XML_PATH, WM_AZURE_CONTEXT.name);
+                return OS_INVALID;
+            }
+
         } else {
             merror(XML_INVELEM, nodes[i]->element);
             return OS_INVALID;

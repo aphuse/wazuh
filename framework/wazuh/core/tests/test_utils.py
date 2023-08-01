@@ -662,6 +662,14 @@ def test_load_wazuh_xml():
 
         assert elements_equal(original, result.find('dummy_tag'))
 
+@pytest.mark.parametrize('expected_exception', [
+    (1113)
+])
+def test_load_wazuh_xml_ko(expected_exception):
+    """Test load_wazuh_xml fails gracefully when reading an invalid utf-8 character sequence"""
+    file_path = os.path.join(test_data_path, 'test_load_wazuh_xml_ko/invalid_utf8.xml')
+    with pytest.raises(WazuhException, match=f'.* {expected_exception} .*'):
+        utils.load_wazuh_xml(file_path)
 
 @pytest.mark.parametrize('version1, version2', [
     ('Wazuh v3.5.0', 'Wazuh v3.5.2'),
@@ -784,41 +792,6 @@ def test_failed_test_get_timeframe_in_seconds():
     """Test get_timeframe_in_seconds function exceptions."""
     with pytest.raises(exception.WazuhException, match=".* 1411 .*"):
         utils.get_timeframe_in_seconds('error')
-
-
-@pytest.mark.parametrize('value', [
-    True,
-    False
-])
-@patch('sqlite3.connect')
-@patch("wazuh.core.database.isfile", return_value=True)
-@patch('socket.socket.connect')
-def test_WazuhDBQuery__init__(mock_socket_conn, mock_isfile, mock_sqli_conn, value):
-    """Test WazuhDBQuery.__init__."""
-    with patch('wazuh.core.utils.glob.glob', return_value=value):
-        if value:
-            utils.WazuhDBQuery(offset=0, limit=1, table='agent', sort=None,
-                               search=None, select=None, filters=None,
-                               fields={'1': None, '2': None}, default_sort_field=None,
-                               default_sort_order='ASC', query=None,
-                               backend=utils.SQLiteBackend(utils.common.DATABASE_PATH),
-                               min_select_fields=1, count=5, get_data=None,
-                               date_fields={'lastKeepAlive', 'dateAdd'},
-                               extra_fields={'internal_key'})
-
-            mock_sqli_conn.assert_called_once()
-
-        else:
-            with pytest.raises(exception.WazuhException, match=".* 1600 .*"):
-                utils.WazuhDBQuery(offset=0, limit=1, table='agent', sort=None,
-                                   search=None, select=None, filters=None,
-                                   fields={'1': None, '2': None},
-                                   default_sort_field=None, default_sort_order='ASC',
-                                   query=None, get_data=None,
-                                   backend=utils.SQLiteBackend(utils.common.DATABASE_PATH),
-                                   min_select_fields=1, count=5,
-                                   date_fields={'lastKeepAlive', 'dateAdd'},
-                                   extra_fields={'internal_key'})
 
 
 @pytest.mark.parametrize('query_filter, expected_query_filter, expected_wef', [
@@ -1268,25 +1241,6 @@ def test_WazuhDBQuery_substitute_params(mock_socket_conn, mock_isfile, mock_conn
     query._get_total_items()
 
     mock_conn_db.assert_called_once_with()
-
-
-@patch('wazuh.core.utils.path.exists', return_value=True)
-@patch('wazuh.core.utils.glob.glob', return_value=True)
-@patch('wazuh.core.utils.SQLiteBackend.connect_to_db')
-@patch("wazuh.core.database.isfile", return_value=True)
-@patch('socket.socket.connect')
-def test_WazuhDBQuery_protected_get_data(mock_socket_conn, mock_isfile, mock_sqli_conn, mock_glob, mock_exists):
-    """Test SQLiteBackend._get_data function."""
-    query = utils.WazuhDBQuery(offset=0, limit=1, table='agent', sort=None,
-                               search=None, select={'fields': set(['os.name'])},
-                               fields={'os.name': 'ubuntu', 'os.version': '18.04'},
-                               default_sort_field=None, query=None,
-                               backend=utils.SQLiteBackend(utils.common.DATABASE_PATH), count=5,
-                               get_data=None, min_select_fields=set(['os.version']))
-
-    query.backend._get_data()
-
-    mock_sqli_conn.assert_called_once_with()
 
 
 @patch('wazuh.core.utils.path.exists', return_value=True)
@@ -1798,9 +1752,10 @@ def test_add_dynamic_detail(detail, value, attribs, details):
         assert details[detail][key] == value
 
 
+@patch('wazuh.core.utils.check_wazuh_limits_unchanged')
 @patch('wazuh.core.utils.check_remote_commands')
 @patch('wazuh.core.manager.common.WAZUH_PATH', new=test_files_path)
-def test_validate_wazuh_xml(mock_remote_commands):
+def test_validate_wazuh_xml(mock_remote_commands, mock_unchanged_limits):
     """Test validate_wazuh_xml method works and methods inside are called with expected parameters"""
 
     with open(os.path.join(test_files_path, 'test_rules.xml')) as f:
@@ -1948,3 +1903,49 @@ def test_get_utc_now():
     date = utils.get_utc_strptime(mock_date, default_format)
     assert isinstance(date, datetime.datetime)
     assert date == datetime.datetime(1970, 1, 1, 0, 1, tzinfo=datetime.timezone.utc)
+
+
+@pytest.mark.parametrize("new_conf, unchanged_limits_conf", [
+    ("<ossec_config><global><limits><eps><maximum>300</maximum><timeframe>5</timeframe></eps></limits></global>"
+     "</ossec_config>", False),
+    ("<ossec_config><global><logall>no</logall></global><global><limits><eps><test>yes</test></eps></limits></global>"
+     "</ossec_config>", False),
+    ("<ossec_config><global><logall>yes</logall><limits><eps><maximum>300</maximum></eps></limits></global>"
+     "</ossec_config>", True),
+    ("<ossec_config><global><logall>yes</logall><limits><eps><maximum>300</maximum></eps></limits></global>"
+     "</ossec_config><ossec_config><global><limits><eps><maximum>300</maximum></eps></limits></global></ossec_config>",
+     False)
+])
+@pytest.mark.parametrize("original_conf", [
+    "<ossec_config><global><limits><eps><maximum>300</maximum></eps></limits></global></ossec_config>"
+])
+@pytest.mark.parametrize("limits_conf", [
+    ({'eps': {'allow': True}}),
+    ({'eps': {'allow': False}})
+])
+def test_check_wazuh_limits_unchanged(new_conf, unchanged_limits_conf, original_conf, limits_conf):
+    """Test if ossec.conf limits are protected by the API.
+
+    When 'eps': {'allow': False} is set in the API configuration, the limits in ossec.conf cannot be changed.
+    However, other configuration sections can be added, removed or modified.
+
+    Parameters
+    ----------
+    new_conf : str
+        New ossec.conf to be uploaded.
+    unchanged_limits_conf : bool
+        Whether the limits section in ossec.conf is the same as the original one.
+    original_conf : str
+        Original ossec.conf to be uploaded.
+    limits_conf : dict
+        API configuration for the limits section.
+    """
+    api_conf = utils.configuration.api_conf
+    api_conf['upload_configuration']['limits'].update(limits_conf)
+
+    with patch('wazuh.core.utils.configuration.api_conf', new=api_conf):
+        if limits_conf['eps']['allow'] or unchanged_limits_conf:
+            utils.check_wazuh_limits_unchanged(new_conf, original_conf)
+        else:
+            with pytest.raises(exception.WazuhError, match=".* 1127 .*"):
+                utils.check_wazuh_limits_unchanged(new_conf, original_conf)

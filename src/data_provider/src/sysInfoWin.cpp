@@ -28,7 +28,6 @@
 #include "stringHelper.h"
 #include "registryHelper.h"
 #include "defs.h"
-#include "debug_op.h"
 #include "osinfo/sysOsInfoWin.h"
 #include "windowsHelper.h"
 #include "encodingWindowsHelper.h"
@@ -291,8 +290,8 @@ static nlohmann::json getProcessInfo(const PROCESSENTRY32& processEntry)
         SysInfoProcess process(pId, processHandle);
 
         // Current process information
-        jsProcessInfo["name"]       = processName(processEntry);
-        jsProcessInfo["cmd"]        = (isSystemProcess(pId)) ? "none" : process.cmd();
+        jsProcessInfo["name"]       = Utils::EncodingWindowsHelper::stringAnsiToStringUTF8(processName(processEntry));
+        jsProcessInfo["cmd"]        = Utils::EncodingWindowsHelper::stringAnsiToStringUTF8((isSystemProcess(pId)) ? "none" : process.cmd());
         jsProcessInfo["stime"]      = process.kernelModeTime();
         jsProcessInfo["size"]       = process.pageFileUsage();
         jsProcessInfo["ppid"]       = processEntry.th32ParentProcessID;
@@ -345,7 +344,18 @@ static void getPackagesFromReg(const HKEY key, const std::string& subKey, std::f
 
                 if (packageReg.string("InstallDate", value))
                 {
-                    install_time = value;
+                    try
+                    {
+                        install_time = Utils::normalizeTimestamp(value, packageReg.keyModificationDate());
+                    }
+                    catch (const std::exception& e)
+                    {
+                        install_time = packageReg.keyModificationDate();
+                    }
+                }
+                else
+                {
+                    install_time = packageReg.keyModificationDate();
                 }
 
                 if (packageReg.string("InstallLocation", value))
@@ -423,7 +433,7 @@ static void getStorePackages(const HKEY key, const std::string& user, std::funct
     }
 }
 
-std::string SysInfo::getSerialNumber() const
+static std::string getSerialNumber()
 {
     std::string ret;
 
@@ -470,26 +480,26 @@ std::string SysInfo::getSerialNumber() const
     return ret;
 }
 
-std::string SysInfo::getCpuName() const
+static std::string getCpuName()
 {
     Utils::Registry reg(HKEY_LOCAL_MACHINE, CENTRAL_PROCESSOR_REGISTRY);
     return reg.string("ProcessorNameString");
 }
 
-int SysInfo::getCpuMHz() const
+static int getCpuMHz()
 {
     Utils::Registry reg(HKEY_LOCAL_MACHINE, CENTRAL_PROCESSOR_REGISTRY);
     return reg.dword("~MHz");
 }
 
-int SysInfo::getCpuCores() const
+static int getCpuCores()
 {
     SYSTEM_INFO siSysInfo{};
     GetSystemInfo(&siSysInfo);
     return siSysInfo.dwNumberOfProcessors;
 }
 
-void SysInfo::getMemory(nlohmann::json& info) const
+static void getMemory(nlohmann::json& info)
 {
     MEMORYSTATUSEX statex;
     statex.dwLength = sizeof(statex);
@@ -509,6 +519,17 @@ void SysInfo::getMemory(nlohmann::json& info) const
             "Error calling GlobalMemoryStatusEx"
         };
     }
+}
+
+nlohmann::json SysInfo::getHardware() const
+{
+    nlohmann::json hardware;
+    hardware["board_serial"] = getSerialNumber();
+    hardware["cpu_name"] = getCpuName();
+    hardware["cpu_cores"] = getCpuCores();
+    hardware["cpu_mhz"] = double(getCpuMHz());
+    getMemory(hardware);
+    return hardware;
 }
 
 static void fillProcessesData(std::function<void(PROCESSENTRY32)> func)
@@ -622,14 +643,14 @@ nlohmann::json SysInfo::getNetworks() const
                     if (AF_INET == unicastAddressFamily)
                     {
                         // IPv4 data
-                        FactoryNetworkFamilyCreator<OSType::WINDOWS>::create(std::make_shared<NetworkWindowsInterface>(Utils::NetworkWindowsHelper::IPV4, rawAdapterAddresses, unicastAddress,
-                                                                                                                       adapterInfo.get()))->buildNetworkData(netInterfaceInfo);
+                        FactoryNetworkFamilyCreator<OSPlatformType::WINDOWS>::create(std::make_shared<NetworkWindowsInterface>(Utils::NetworkWindowsHelper::IPV4, rawAdapterAddresses, unicastAddress,
+                                                                                                                               adapterInfo.get()))->buildNetworkData(netInterfaceInfo);
                     }
                     else if (AF_INET6 == unicastAddressFamily)
                     {
                         // IPv6 data
-                        FactoryNetworkFamilyCreator<OSType::WINDOWS>::create(std::make_shared<NetworkWindowsInterface>(Utils::NetworkWindowsHelper::IPV6, rawAdapterAddresses, unicastAddress,
-                                                                                                                       adapterInfo.get()))->buildNetworkData(netInterfaceInfo);
+                        FactoryNetworkFamilyCreator<OSPlatformType::WINDOWS>::create(std::make_shared<NetworkWindowsInterface>(Utils::NetworkWindowsHelper::IPV6, rawAdapterAddresses, unicastAddress,
+                                                                                                                               adapterInfo.get()))->buildNetworkData(netInterfaceInfo);
                     }
                 }
 
@@ -637,8 +658,8 @@ nlohmann::json SysInfo::getNetworks() const
             }
 
             // Common data
-            FactoryNetworkFamilyCreator<OSType::WINDOWS>::create(std::make_shared<NetworkWindowsInterface>(Utils::NetworkWindowsHelper::COMMON_DATA, rawAdapterAddresses, unicastAddress,
-                                                                                                           adapterInfo.get()))->buildNetworkData(netInterfaceInfo);
+            FactoryNetworkFamilyCreator<OSPlatformType::WINDOWS>::create(std::make_shared<NetworkWindowsInterface>(Utils::NetworkWindowsHelper::COMMON_DATA, rawAdapterAddresses, unicastAddress,
+                                                                                                                   adapterInfo.get()))->buildNetworkData(netInterfaceInfo);
 
             networks["iface"].push_back(netInterfaceInfo);
         }

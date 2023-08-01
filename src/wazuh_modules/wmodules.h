@@ -14,7 +14,7 @@
 
 #include "shared.h"
 #include <pthread.h>
-#include "config/config.h"
+#include "../config/config.h"
 #include "wmodules_def.h"
 
 #define WM_STATE_DIR    "var/wodles"               // Default directory for states.
@@ -23,7 +23,7 @@
 #define WM_BUFFER_MAX   1024                        // Max. static buffer size.
 #define WM_BUFFER_MIN   1024                        // Starting JSON buffer length.
 #define WM_MAX_ATTEMPTS 3                           // Max. number of attempts.
-#define WM_MAX_WAIT     1                           // Max. wait between attempts.
+#define WM_MAX_WAIT     500                           // Max. wait between attempts in milliseconds.
 #define WM_IO_WRITE     0
 #define WM_IO_READ      1
 #define WM_ERROR_TIMEOUT 1                          // Error code for timeout.
@@ -201,5 +201,27 @@ void wmcom_send(char * message);
 size_t wmcom_dispatch(char * command, char ** output);
 size_t wmcom_getconfig(const char * section, char ** output);
 int wmcom_sync(char * buffer);
+
+/**
+ * @brief Find a module
+ *
+ * @param name Name of the module.
+ * @return Pointer to a module structure.
+ * @return NULL if the module was not found.
+ */
+wmodule * wm_find_module(const char * name);
+
+/**
+ * @brief Run a query in a module
+ *
+ * Run a command into a module structure, not in the same thread.
+ * Query format: <module name> <command>
+ * Example: "vulnerability-detector run_now"
+ *
+ * @param query Command query
+ * @param output Output payload
+ * @return Size of the output
+ */
+size_t wm_module_query(char * query, char ** output);
 
 #endif // W_MODULES

@@ -38,7 +38,8 @@ CREATE TABLE IF NOT EXISTS agent (
     sync_status TEXT NOT NULL CHECK (sync_status IN ('synced', 'syncreq')) DEFAULT 'synced',
     connection_status TEXT NOT NULL CHECK (connection_status IN ('pending', 'never_connected', 'active', 'disconnected')) DEFAULT 'never_connected',
     disconnection_time INTEGER DEFAULT 0,
-    group_config_status TEXT NOT NULL CHECK (group_config_status IN ('synced', 'not synced')) DEFAULT 'not synced'
+    group_config_status TEXT NOT NULL CHECK (group_config_status IN ('synced', 'not synced')) DEFAULT 'not synced',
+    status_code INTEGER DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS agent_name ON agent (name);
@@ -65,9 +66,11 @@ CREATE TABLE IF NOT EXISTS `group` (
     UNIQUE (name)
 );
 
+CREATE INDEX IF NOT EXISTS group_name ON `group` (name);
+
 CREATE TABLE IF NOT EXISTS belongs (
     id_agent INTEGER REFERENCES agent (id) ON DELETE CASCADE,
-    id_group INTEGER,
+    id_group INTEGER REFERENCES `group` (id) ON DELETE CASCADE,
     priority INTEGER NOT NULL DEFAULT 0,
     UNIQUE (id_agent, priority),
     PRIMARY KEY (id_agent, id_group)
@@ -81,4 +84,4 @@ CREATE TABLE IF NOT EXISTS metadata (
     value TEXT
 );
 
-INSERT INTO metadata (key, value) VALUES ('db_version', '4');
+INSERT INTO metadata (key, value) VALUES ('db_version', '5');

@@ -4,23 +4,25 @@
 
 import os
 import re
+from types import MappingProxyType
 from typing import Dict, List
 
 from defusedxml import ElementTree as ET
 from jsonschema import draft4_format_checker
 
 from wazuh.core import common
+from wazuh.core.exception import WazuhError
 
 _alphanumeric_param = re.compile(r'^[\w,\-.+\s:]+$')
-_symbols_alphanumeric_param = re.compile(r'^[\w,<>!\-.+\s:/()\[\]\'\"|=~#]+$')
+_symbols_alphanumeric_param = re.compile(r'^[\w,*<>!\-.+\s:/()\[\]\'\"|=~#]+$')
 _array_numbers = re.compile(r'^\d+(,\d+)*$')
 _array_names = re.compile(r'^[\w\-.%]+(,[\w\-.%]+)*$')
 _base64 = re.compile(r'^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$')
 _boolean = re.compile(r'^true$|^false$')
 _dates = re.compile(r'^\d{8}$')
 _empty_boolean = re.compile(r'^$|(^true$|^false$)')
-_group_names = re.compile(r'^(?!^(\.{1,2}|all)$)[\w.\-]+$')
-_group_names_or_all = re.compile(r'^(?!^\.{1,2}$)[\w.\-]+$')
+_group_names = re.compile(r'^(?!^(\.{1,2}|all)$)[A-Za-z0-9.\-_]+$')
+_group_names_or_all = re.compile(r'^(?!^\.{1,2}$)[A-Za-z0-9.\-_]+$')
 _hashes = re.compile(r'^(?:[\da-fA-F]{32})?$|(?:[\da-fA-F]{40})?$|(?:[\da-fA-F]{56})?$|(?:[\da-fA-F]{64})?$|(?:['
                      r'\da-fA-F]{96})?$|(?:[\da-fA-F]{128})?$')
 _ips = re.compile(
@@ -46,7 +48,9 @@ _search_param = re.compile(r'^[^;|&^*>]+$')
 _sort_param = re.compile(r'^[\w_\-,\s+.]+$')
 _timeframe_type = re.compile(r'^(\d+[dhms]?)$')
 _type_format = re.compile(r'^xml$|^json$')
+_wpk_path = re.compile(r'^[\w\-.\\/:\s]*[^\/]\.wpk$')
 _yes_no_boolean = re.compile(r'^yes$|^no$')
+_active_response_command = re.compile(f"^!?{_paths.pattern.lstrip('^')}")
 
 security_config_schema = {
     "type": "object",
@@ -97,7 +101,15 @@ api_config_schema = {
             "properties": {
                 "level": {"type": "string"},
                 "path": {"type": "string"},  # Deprecated. To be removed on later versions
-                "format": {"type": "string", "enum": ["plain", "json", "plain,json", "json,plain"]}
+                "format": {"type": "string", "enum": ["plain", "json", "plain,json", "json,plain"]},
+                "max_size": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "enabled": {"type": "boolean"},
+                        "size": {"type": "string"}
+                    }
+                }
             },
         },
         "cors": {
@@ -138,35 +150,75 @@ api_config_schema = {
                 "max_request_per_minute": {"type": "integer"},
             },
         },
-        "remote_commands": {
+        "upload_configuration": {
             "type": "object",
             "additionalProperties": False,
             "properties": {
-                "localfile": {
+                "remote_commands": {
                     "type": "object",
                     "additionalProperties": False,
                     "properties": {
-                        "enabled": {"type": "boolean"},
-                        "exceptions": {"type": "array", "items": {"type": "string"}},
+                        "localfile": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "properties": {
+                                "allow": {"type": "boolean"},
+                                "exceptions": {"type": "array", "items": {"type": "string"}},
+                            },
+                        },
+                        "wodle_command": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "properties": {
+                                "allow": {"type": "boolean"},
+                                "exceptions": {"type": "array", "items": {"type": "string"}},
+                            },
+                        },
                     },
                 },
-                "wodle_command": {
+                "limits": {
                     "type": "object",
                     "additionalProperties": False,
                     "properties": {
-                        "enabled": {"type": "boolean"},
-                        "exceptions": {"type": "array", "items": {"type": "string"}},
-                    },
-                },
-            },
+                        "eps": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "properties": {
+                                "allow": {
+                                    "type": "boolean"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         },
     },
 }
 
+WAZUH_COMPONENT_CONFIGURATION_MAPPING = MappingProxyType(
+    {
+        'agent': {"client", "buffer", "labels", "internal"},
+        'agentless': {"agentless"},
+        'analysis': {"global", "active_response", "alerts", "command", "rules", "decoders", "internal", "rule_test"},
+        'auth': {"auth"},
+        'com': {"active-response", "logging", "internal", "cluster"},
+        'csyslog': {"csyslog"},
+        'integrator': {"integration"},
+        'logcollector': {"localfile", "socket", "internal"},
+        'mail': {"global", "alerts", "internal"},
+        'monitor': {"global", "internal", "reports"},
+        'request': {"global", "remote", "internal"},
+        'syscheck': {"syscheck", "rootcheck", "internal"},
+        'wazuh-db': {"wdb", "internal"},
+        'wmodules': {"wmodules"}
+    }
+)
+
 
 def check_exp(exp: str, regex: re.Pattern) -> bool:
     """Function to check if an expression matches a regex.
-    
+
     Parameters
     ----------
     exp : str
@@ -186,7 +238,7 @@ def check_exp(exp: str, regex: re.Pattern) -> bool:
 
 def check_xml(xml_string: str) -> bool:
     """Function to check if an XML string is correct.
-    
+
     Parameters
     ----------
     xml_string : str
@@ -209,7 +261,7 @@ def check_xml(xml_string: str) -> bool:
 
 def allowed_fields(filters: Dict) -> List:
     """Return a list with allowed fields.
-    
+
     Parameters
     ----------
     filters : dict
@@ -225,7 +277,7 @@ def allowed_fields(filters: Dict) -> List:
 
 def is_safe_path(path: str, basedir: str = common.WAZUH_PATH, relative: bool = True) -> bool:
     """Check if a path is correct.
-    
+
     Parameters
     ----------
     path : str
@@ -241,7 +293,8 @@ def is_safe_path(path: str, basedir: str = common.WAZUH_PATH, relative: bool = T
         True if path is correct. False otherwise.
     """
     # Protect path
-    if './' in path or '../' in path:
+    forbidden_paths = ["../", "..\\", "/..", "\\.."]
+    if any([forbidden_path in path for forbidden_path in forbidden_paths]):
         return False
 
     # Resolve symbolic links if present
@@ -249,6 +302,27 @@ def is_safe_path(path: str, basedir: str = common.WAZUH_PATH, relative: bool = T
     full_basedir = os.path.abspath(basedir)
 
     return os.path.commonpath([full_path, full_basedir]) == full_basedir
+
+
+def check_component_configuration_pair(component: str, configuration: str) -> WazuhError:
+    """
+
+    Parameters
+    ----------
+    component : str
+        Wazuh component name.
+    configuration : str
+        Component configuration.
+
+    Returns
+    -------
+    WazuhError
+        It can either return a `WazuhError` or `None`, depending on the given component and configuration. The exception
+        is returned and not raised because we use the object to create a problem on API level.
+    """
+    if configuration not in WAZUH_COMPONENT_CONFIGURATION_MAPPING[component]:
+        return WazuhError(1128, extra_message=f"Valid configuration values for '{component}': "
+                                              f"{WAZUH_COMPONENT_CONFIGURATION_MAPPING[component]}")
 
 
 @draft4_format_checker.checks("alphanumeric")
@@ -316,11 +390,18 @@ def format_path(value):
     return check_exp(value, _paths)
 
 
-@draft4_format_checker.checks("wazuh_path")
-def format_wazuh_path(value):
+@draft4_format_checker.checks("wpk_path")
+def format_wpk_path(value):
     if not is_safe_path(value, relative=False):
         return False
-    return check_exp(value, _paths)
+    return check_exp(value, _wpk_path)
+
+
+@draft4_format_checker.checks("active_response_command")
+def format_active_response_command(command):
+    if not is_safe_path(command):
+        return False
+    return check_exp(command, _active_response_command)
 
 
 @draft4_format_checker.checks("query")

@@ -804,7 +804,7 @@ int wdb_hardware_insert(wdb_t * wdb, const char * scan_id, const char * scan_tim
         sqlite3_bind_null(stmt, 8);
     }
 
-    if (ram_usage > 0) {
+    if (ram_usage > 0 && ram_usage <= 100) {
         sqlite3_bind_int(stmt, 9, ram_usage);
     } else {
         sqlite3_bind_null(stmt, 9);
@@ -1359,9 +1359,6 @@ int wdb_syscollector_save2(wdb_t * wdb, wdb_component_t component, const char * 
     {
         result = wdb_syscollector_osinfo_save2(wdb, attributes);
     }
-    if(data)
-    {
-        cJSON_Delete(data);
-    }
+    cJSON_Delete(data);
     return result;
 }

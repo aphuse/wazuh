@@ -19,7 +19,7 @@
 import logging
 import sys
 from argparse import ArgumentParser
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from hashlib import md5
 from json import dumps, loads, JSONDecodeError
 from os.path import abspath, dirname
@@ -30,7 +30,6 @@ from azure.storage.blob import BlockBlobService
 from azure.storage.common._error import AzureSigningError
 from azure.storage.common.retry import no_retry
 from dateutil.parser import parse
-from pytz import UTC
 from requests import get, post, HTTPError, RequestException
 
 import orm
@@ -55,6 +54,10 @@ LOG_LEVELS = {0: logging.WARNING,
               1: logging.INFO,
               2: logging.DEBUG}
 
+CREDENTIALS_URL = 'https://documentation.wazuh.com/current/azure/activity-services/prerequisites/credentials.html'
+DEPRECATED_MESSAGE = 'The {name} authentication parameter was deprecated in {release}. ' \
+                     'Please use another authentication method instead. Check {url} for more information.'
+
 
 def set_logger():
     """Set the logger configuration."""
@@ -76,9 +79,11 @@ def get_script_arguments():
 
     # Log Analytics arguments #
     parser.add_argument("--la_id", metavar='ID', type=str, required=False,
-                        help="Application ID for Log Analytics authentication.")
+                        help="Application ID for Log Analytics authentication. "
+                             f"{DEPRECATED_MESSAGE.format(name='la_id', release='4.4', url=CREDENTIALS_URL)}")
     parser.add_argument("--la_key", metavar="KEY", type=str, required=False,
-                        help="Application Key for Log Analytics authentication.")
+                        help="Application Key for Log Analytics authentication. "
+                             f"{DEPRECATED_MESSAGE.format(name='la_key', release='4.4', url=CREDENTIALS_URL)}")
     parser.add_argument("--la_auth_path", metavar="filepath", type=str, required=False,
                         help="Path of the file containing the credentials for authentication.")
     parser.add_argument("--la_tenant_domain", metavar="domain", type=str, required=False,
@@ -94,9 +99,11 @@ def get_script_arguments():
 
     # Graph arguments #
     parser.add_argument("--graph_id", metavar='ID', type=str, required=False,
-                        help="Application ID for Graph authentication.")
+                        help="Application ID for Graph authentication. "
+                             f"{DEPRECATED_MESSAGE.format(name='graph_id', release='4.4', url=CREDENTIALS_URL)}")
     parser.add_argument("--graph_key", metavar="KEY", type=str, required=False,
-                        help="Application KEY for Graph authentication.")
+                        help="Application KEY for Graph authentication. "
+                             f"{DEPRECATED_MESSAGE.format(name='graph_key', release='4.4', url=CREDENTIALS_URL)}")
     parser.add_argument("--graph_auth_path", metavar="filepath", type=str, required=False,
                         help="Path of the file containing the credentials authentication.")
     parser.add_argument("--graph_tenant_domain", metavar="domain", type=str, required=False,
@@ -110,9 +117,11 @@ def get_script_arguments():
 
     # Storage arguments #
     parser.add_argument("--account_name", metavar='account', type=str, required=False,
-                        help="Storage account name for authentication.")
+                        help="Storage account name for authentication. "
+                             f"{DEPRECATED_MESSAGE.format(name='account_name', release='4.4', url=CREDENTIALS_URL)}")
     parser.add_argument("--account_key", metavar='KEY', type=str, required=False,
-                        help="Storage account key for authentication.")
+                        help="Storage account key for authentication. "
+                             f"{DEPRECATED_MESSAGE.format(name='account_key', release='4.4', url=CREDENTIALS_URL)}")
     parser.add_argument("--storage_auth_path", metavar="filepath", type=str, required=False,
                         help="Path of the file containing the credentials authentication.")
     parser.add_argument("--container", metavar="container", required=False, type=arg_valid_container_name,
@@ -129,6 +138,8 @@ def get_script_arguments():
                              "By default, the content of the blob is considered to be plain text.")
     parser.add_argument("--storage_time_offset", metavar="time", type=str, required=False,
                         help="Time range for the request.")
+    parser.add_argument('-p', '--prefix', dest='prefix', help='The relative path to the logs', type=str, required=False)
+
 
     # General parameters #
     parser.add_argument('--reparse', action='store_true', dest='reparse',
@@ -283,6 +294,7 @@ def start_log_analytics():
     if args.la_auth_path and args.la_tenant_domain:
         client, secret = read_auth_file(auth_path=args.la_auth_path, fields=("application_id", "application_key"))
     elif args.la_id and args.la_key and args.la_tenant_domain:
+        logging.warning(DEPRECATED_MESSAGE.format(name="la_id and la_key", release="4.4", url=CREDENTIALS_URL))
         client = args.la_id
         secret = args.la_key
     else:
@@ -459,6 +471,7 @@ def start_graph():
     if args.graph_auth_path and args.graph_tenant_domain:
         client, secret = read_auth_file(auth_path=args.graph_auth_path, fields=("application_id", "application_key"))
     elif args.graph_id and args.graph_key and args.graph_tenant_domain:
+        logging.warning(DEPRECATED_MESSAGE.format(name="graph_id and graph_key", release="4.4", url=CREDENTIALS_URL))
         client = args.graph_id
         secret = args.graph_key
     else:
@@ -592,6 +605,7 @@ def start_storage():
     if args.storage_auth_path:
         name, key = read_auth_file(auth_path=args.storage_auth_path, fields=("account_name", "account_key"))
     elif args.account_name and args.account_key:
+        logging.warning(DEPRECATED_MESSAGE.format(name="account_name and account_key", release="4.4", url=CREDENTIALS_URL))
         name = args.account_name
         key = args.account_key
     else:
@@ -644,13 +658,15 @@ def start_storage():
         min_datetime = parse(item.min_processed_date, fuzzy=True)
         max_datetime = parse(item.max_processed_date, fuzzy=True)
         desired_datetime = offset_to_datetime(offset) if offset else max_datetime
-        get_blobs(container_name=container, blob_service=block_blob_service, md5_hash=md5_hash,
+        get_blobs(container_name=container, prefix=args.prefix, blob_service=block_blob_service, md5_hash=md5_hash,
                   min_datetime=min_datetime, max_datetime=max_datetime, desired_datetime=desired_datetime)
     logging.info("Storage: End")
 
 
-def get_blobs(container_name: str, blob_service: BlockBlobService, md5_hash: str, min_datetime: datetime,
-              max_datetime: datetime, desired_datetime: datetime, next_marker: str = None):
+def get_blobs(
+    container_name: str, blob_service: BlockBlobService, md5_hash: str, min_datetime: datetime, max_datetime: datetime,
+    desired_datetime: datetime, next_marker: str = None, prefix: str = None
+):
     """Get the blobs from a container and send their content.
 
     Parameters
@@ -669,6 +685,8 @@ def get_blobs(container_name: str, blob_service: BlockBlobService, md5_hash: str
         md5 value used to search the container in the file containing the dates.
     next_marker : str
         Token used as a marker to continue from previous iteration.
+    prefix : str, optional
+        Prefix value to search blobs that match with it.
 
     Raises
     ------
@@ -678,15 +696,21 @@ def get_blobs(container_name: str, blob_service: BlockBlobService, md5_hash: str
     try:
         # Get the blob list
         logging.info("Storage: Getting blobs.")
-        blobs = blob_service.list_blobs(container_name, marker=next_marker)
+        blobs = blob_service.list_blobs(container_name, prefix=prefix, marker=next_marker)
     except AzureException as e:
         logging.error(f"Storage: Error getting blobs from '{container_name}': '{e}'.")
         raise e
     else:
 
         logging.info(f"Storage: The search starts from the date: {desired_datetime} for blobs in "
-                     f"container: '{container_name}' ")
+                     f"container: '{container_name}' and prefix: '/{prefix if prefix is not None else ''}'")
         for blob in blobs:
+            # Skip if the blob is empty
+            if blob.properties.content_length == 0:
+                continue
+            # Skip the blob if nested under prefix but prefix is not setted
+            if prefix is None and len(blob.name.split("/")) > 1:
+                continue
             # Skip the blob if its name has not the expected format
             if args.blobs and args.blobs not in blob.name:
                 continue
@@ -839,11 +863,11 @@ def offset_to_datetime(offset: str):
     unit = offset[len(offset) - 1:]
 
     if unit == 'h':
-        return datetime.utcnow().replace(tzinfo=UTC) - timedelta(hours=value)
+        return datetime.utcnow().replace(tzinfo=timezone.utc) - timedelta(hours=value)
     if unit == 'm':
-        return datetime.utcnow().replace(tzinfo=UTC) - timedelta(minutes=value)
+        return datetime.utcnow().replace(tzinfo=timezone.utc) - timedelta(minutes=value)
     if unit == 'd':
-        return datetime.utcnow().replace(tzinfo=UTC) - timedelta(days=value)
+        return datetime.utcnow().replace(tzinfo=timezone.utc) - timedelta(days=value)
 
     logging.error("Invalid offset format. Use 'h', 'm' or 'd' time unit.")
     exit(1)
